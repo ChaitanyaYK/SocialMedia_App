@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser"
-import { DATA_LIMIT } from "./constants";
+import { DATA_LIMIT } from "./constants.js";
 
 const app = express()
 
@@ -20,8 +20,9 @@ app.use(cookieParser()) // THis is used to store cookie in local server
 
 
 // Routes
-import userRouter from "./routes/user.routes.js"
+import userRoutes from "./routes/user.routes.js"
 
-app.post("/user", userRouter)
+app.use("/api/v1/user", userRoutes)
 
-export {app}
+// http://localhost:8000/api/v1/user/register
+export default app
