@@ -20,9 +20,9 @@ app.use(cookieParser()) // THis is used to store cookie in local server
 
 
 // Routes
-import userRoutes from "./routes/user.routes.js"
+import userRouter from "./routes/user.routes.js"
 
-app.use("/api/v1/user", userRoutes)
+app.use("/api/v1/user", userRouter)
 
 // http://localhost:8000/api/v1/user/register
 export default app
