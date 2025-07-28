@@ -1,0 +1,360 @@
+import mongoose, {isValidObjectId} from "mongoose"
+import {Like} from "../models/like.model.js"
+import {ApiError} from "../utils/ApiError.js"
+import {ApiResponse} from "../utils/ApiResponse.js"
+import {asyncHandler} from "../utils/asyncHandler.js"
+
+
+const toggleVideoLike = asyncHandler(async (req, res) => {
+    const {videoId} = req.params
+    //TODO: toggle like on video
+
+    const userId = req.user?._id;
+
+    if (!isValidObjectId(videoId)) {
+        throw new ApiError(400, "Invalid video ID");
+    }
+
+    const isLiked = await Like.findOne({ video: videoId, likedBy: userId});
+
+    if (isLiked) {
+       await isLiked.deleteOne();
+       return res.status(200).json(new ApiResponse(200, {}, "Video disliked successfully"))
+    }
+
+    const newLike = await Like.create({ video: videoId, likedBy: userId });
+
+    return res.status(201)
+    .json(new ApiResponse(200, newLike, "Video liked successfully"))
+    
+})
+
+
+const toggleCommentLike = asyncHandler(async (req, res) => {
+    const {commentId} = req.params
+    //TODO: toggle like on comment
+
+    const userId = req.user?._id;
+
+    if (!commentId || !isValidObjectId(commentId)) {
+        throw new ApiError(400, "Invalid Comment ID")
+    }
+
+    if (!userId || !isValidObjectId(userId)) {
+        throw new ApiError(400, "Invalid User ID")
+    }
+
+    const likedComment = await Like.findOne({comment: commentId, likedBy: userId})
+
+    if (likedComment) {
+        await likedComment.deleteOne()
+        return res.status(200).json(new ApiResponse(200, {}, "Comment disliked successfully"))
+    }
+
+    const newLike = await Like.create({ comment: commentId, likedBy: userId });
+
+    return res.status(201)
+    .json(new ApiResponse(200, newLike, "Comment liked successfully"))
+})
+
+
+const toggleTweetLike = asyncHandler(async (req, res) => {
+    const {tweetId} = req.params
+    //TODO: toggle like on tweet
+
+    const userId = req.user?._id
+
+    if (!isValidObjectId(tweetId)) {
+        throw new ApiError(400, "Invalid tweet ID");
+    }
+    if (!isValidObjectId(userId)) {
+        throw new ApiError(400, "Invalid user ID");
+    }
+
+    const isLike = await Like.findOne({tweet: tweetId, likedBy: userId})
+   
+    if (isLike) {
+        await isLike.deleteOne();
+        return res.status(200).json(new ApiResponse(200, {}, "Tweet disliked successfully"))
+    }
+
+    const newLike = await Like.create({tweet: tweetId, likedBy: userId})
+    
+    return res.status(201)
+    .json(new ApiResponse(201, newLike, "Tweet liked successfully"))
+})
+
+
+const getLikedVideos = asyncHandler(async (req, res) => {
+    //TODO: get all liked videos
+
+    const {limit = 10, page = 1, query = "", sortBy = '{"createdAt": -1}', sortType = "newest"} = req.query;
+
+    const userId = req.user?._id
+
+    if (!userId || !isValidObjectId(userId)) {
+        throw new ApiError(400, "Invalid User ID")
+    }
+    
+    let parsedSortBy;
+    try {
+        parsedSortBy = typeof sortBy === "string" ? JSON.parse(sortBy) : sortBy;
+    } catch {
+        parsedSortBy = { createdAt: -1 };
+    }
+    
+    const liked = await Like.aggregate([
+        {
+            $match: {
+                likedBy: new mongoose.Types.ObjectId(userId),
+                // video: {$ne: null}
+            }
+        },
+        {
+            $lookup: {
+                from: "videos",
+                localField: "video",
+                foreignField: "_id",
+                as: "video",
+            }
+        },
+        {
+            $addFields: {
+                video: { $first: "$video" }
+            }
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "video.owner",
+                foreignField: "_id",
+                as: "video.owner",
+            }
+        },
+        {
+            $addFields: {
+                "video.owner": { $first: "$video.owner"}
+            }
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "likedBy",
+                foreignField: "_id",
+                as: "likedBy",
+            }
+        },
+        {
+            $addFields: {
+                likedBy: { $first: "$likedBy" },
+                // likeCount: { $size: "likeCount" }
+            }
+        },
+        {
+            $project: {
+                _id: 1,
+                likedBy: {
+                    _id: 1,
+                    username: 1
+                },
+                video: {
+                    _id: 1,
+                    title: 1,
+                    description: 1,
+                    thumbnail: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    owner: {
+                        _id: 1,
+                        username: 1,
+                        avatar: 1
+                    }
+                }
+            }
+        },
+        { $sort: parsedSortBy },
+        { $skip: (parseInt(page) - 1) * parseInt(limit)},
+        { $limit: parseInt(limit)}
+    ])
+
+    const totalVideoLiked = await Like.countDocuments({likedBy: new mongoose.Types.ObjectId(userId)})
+
+    return res.status(200)
+    .json(new ApiResponse(200, {
+        videos: liked,
+        total: totalVideoLiked,
+        page: parseInt(page),
+        limit: parseInt(limit)
+    }, "All liked video by user fetched successfully"))
+})
+
+
+const getLikedComments =  asyncHandler(async (req, res) => {
+    //TODO: get all liked comments
+
+    const {limit = 10, page = 1, sortType = "newest"} = req.query;
+
+    const userId = req.user?._id;
+
+    if (!userId || !isValidObjectId(userId)) {
+        throw new ApiError(400, "Invalid User ID")
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const sortStage = sortType === "oldest" ? { "comments.createdAt": 1 } : { "comments.createdAt": -1 };
+    
+    const liked = await Like.aggregate([
+        {
+            $match: {
+                likedBy: mongoose.Types.ObjectId(userId),
+                comment: {$ne: null}
+            }
+        },
+        {
+            $lookup: {
+                from: "comments",
+                localField: "comment",
+                foreignField: "_id",
+                as: "comments",
+            }
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "comment.owner",
+                foreignField: "_id",
+                as: "commentOwner"
+            }
+        },
+        {
+            $addFields: {
+               commentOwner: {$first: "$commentOwner"}
+            }
+        },
+        
+        { $sort: sortStage},
+        { $skip: skip},
+        { $limit: parseInt(limit)},
+        {
+            $project: {
+                _id: 1,
+                comment: {
+                    _id: "$comments._id",
+                    content: "$comments.content",
+                    createdAt: "$comments.createdAt",
+                    updatedAt: "$comments.updatedAt",
+                    owner: {
+                        _id: "$commentOwner._id",
+                        username: "$commentOwner.username",
+                        avatar: "$commentOwner.avatar"
+                    }
+                }
+            }
+        }
+    ])
+
+    const total = await Like.countDocuments({likedBy: userId, comment: {$ne: null}})
+
+    return res.status(200)
+    .json(new ApiResponse(200, {
+        likedComments: liked,
+            pagination: {
+                total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                totalPages: Math.ceil(total / parseInt(limit))
+            }
+    }, "All liked video by user fetched successfully"))
+})
+
+
+const getLikedTweets =  asyncHandler(async (req, res) => {
+    //TODO: get all liked tweets
+
+    const {limit = 10, page = 1, sortType = "newest"} = req.query;
+
+    const userId = req.user?._id;
+
+    if (!userId || !isValidObjectId(userId)) {
+        throw new ApiError(400, "Invalid User ID")
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const sortStage = sortType === "oldest" ? { "comments.createdAt": 1 } : { "comments.createdAt": -1 };
+    
+    const liked = await Like.aggregate([
+        {
+            $match: {
+                likedBy: mongoose.Types.ObjectId(userId),
+                tweet: {$ne: null}
+            }
+        },
+        {
+            $lookup: {
+                from: "tweets",
+                localField: "tweet",
+                foreignField: "_id",
+                as: "tweet"
+            }
+        },
+        {
+            $unwind: "$tweet"
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "tweet.owner",
+                foreignField: "_id",
+                as: "tweetOwner",
+            }
+        },
+        {
+            $addFields: {
+                tweetOwner: { $first: "$tweetOwner" }
+            }
+        },
+        { $sort: sortStage},
+        { $skip: skip},
+        { $limit: parseInt(limit)},
+        {
+            $project: {
+                _id: 1,
+                tweet: {
+                    _id: "$tweet._id",
+                    content: "$tweet.content",
+                    createdAt: "$tweet.createdAt",
+                    updatedAt: "$tweet.updatedAt",
+                    owner: {
+                        _id: "$tweetOwner._id",
+                        username: "$tweetOwner.username",
+                        avatar: "$tweetOwner.avatar"
+                    }
+                }
+            }
+        },
+    ])
+
+    const total = await Like.countDocuments({ likedBy: userId, tweet: { $ne: null } });
+
+
+    return res.status(200)
+    .json(new ApiResponse(200, {
+            likedTweets: liked,
+            pagination: {
+                total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                totalPages: Math.ceil(total / parseInt(limit))
+            }
+        }, "All liked tweet by user fetched successfully"))
+})
+
+
+export {
+    toggleCommentLike,
+    toggleTweetLike,
+    toggleVideoLike,
+    getLikedVideos,
+    getLikedComments,
+    getLikedTweets
+}
