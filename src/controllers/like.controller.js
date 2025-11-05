@@ -151,8 +151,22 @@ const getLikedVideos = asyncHandler(async (req, res) => {
             }
         },
         {
+            $lookup: {
+                from: "likes",
+                localField: "_id",
+                foreignField: "video",
+                as: "videoLikes"
+            }
+        },
+        {
+            $addFields: {
+                likeCount: { $size: "$videoLikes" }
+            }
+        },
+        {
             $project: {
                 _id: 1,
+                likeCount: 1,
                 likedBy: {
                     _id: 1,
                     username: 1
@@ -206,7 +220,7 @@ const getLikedComments =  asyncHandler(async (req, res) => {
     const liked = await Like.aggregate([
         {
             $match: {
-                likedBy: mongoose.Types.ObjectId(userId),
+                likedBy: new mongoose.Types.ObjectId(userId),
                 comment: {$ne: null}
             }
         },
@@ -217,6 +231,9 @@ const getLikedComments =  asyncHandler(async (req, res) => {
                 foreignField: "_id",
                 as: "comments",
             }
+        },
+        {
+            $unwind: "$comments"
         },
         {
             $lookup: {
@@ -231,7 +248,19 @@ const getLikedComments =  asyncHandler(async (req, res) => {
                commentOwner: {$first: "$commentOwner"}
             }
         },
-        
+        {
+            $lookup: {
+                from: "likes",
+                localField: "comments._id",
+                foreignField: "comment",
+                as: "commentLikes"
+            }
+        },
+        {
+            $addFields: {
+                likeCount: { $size: "$commentLikes"}
+            }
+        },
         { $sort: sortStage},
         { $skip: skip},
         { $limit: parseInt(limit)},
@@ -243,6 +272,7 @@ const getLikedComments =  asyncHandler(async (req, res) => {
                     content: "$comments.content",
                     createdAt: "$comments.createdAt",
                     updatedAt: "$comments.updatedAt",
+                    likeCount: "$likeCount",
                     owner: {
                         _id: "$commentOwner._id",
                         username: "$commentOwner.username",
@@ -285,7 +315,7 @@ const getLikedTweets =  asyncHandler(async (req, res) => {
     const liked = await Like.aggregate([
         {
             $match: {
-                likedBy: mongoose.Types.ObjectId(userId),
+                likedBy: new mongoose.Types.ObjectId(userId),
                 tweet: {$ne: null}
             }
         },
@@ -313,6 +343,19 @@ const getLikedTweets =  asyncHandler(async (req, res) => {
                 tweetOwner: { $first: "$tweetOwner" }
             }
         },
+        {
+            $lookup: {
+                from: "likes",
+                localField: "tweet._id",
+                foreignField: "tweet",
+                as: "tweetLikes"
+            }
+        },
+        {
+            $addFields: {
+                likeCount: {$size: "$tweetLikes"}
+            }
+        },
         { $sort: sortStage},
         { $skip: skip},
         { $limit: parseInt(limit)},
@@ -324,6 +367,7 @@ const getLikedTweets =  asyncHandler(async (req, res) => {
                     content: "$tweet.content",
                     createdAt: "$tweet.createdAt",
                     updatedAt: "$tweet.updatedAt",
+                    likeCount: "$likeCount",
                     owner: {
                         _id: "$tweetOwner._id",
                         username: "$tweetOwner.username",

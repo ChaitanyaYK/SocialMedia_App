@@ -253,7 +253,7 @@ const refreshAccessToken = asyncHandler( async (req, res) => {
             )
         )
     } catch (error) {
-        console.error("❌ Refresh token error:", error);
+        console.error("Refresh token error:", error);
         throw new ApiError(error?.message || "Invalid refresh Token")
     }
 } )
@@ -279,7 +279,7 @@ const changeCurrentUserPassword = asyncHandler( async (req, res) => {
 
 const getCurrentUser = asyncHandler(async (req, res) => {
     return res.status(200)
-    .json(new ApiResponse(200, {}, "Current user fetchedd successfully"))
+    .json(new ApiResponse(200, req.user, "Current user fetchedd successfully"))
 })
 
 
