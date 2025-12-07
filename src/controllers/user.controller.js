@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { User } from "../models/user.model.js"
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import { deleteOnCloudinary, uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
 // import { Subscription } from "../models/subscription.model.js";
@@ -41,7 +41,7 @@ const registerUser = asyncHandler( async (req, res) => {
     // check for user creation
     // return response
 
-    const {fullName, email, username, password} = req.body
+    const {fullName, email, username, password} = req.body;
     // console.log("email: ", email);
 
     // console.log(req.body);
@@ -91,8 +91,14 @@ const registerUser = asyncHandler( async (req, res) => {
     // Here we create entry of user in DataBase
     const user = await User.create({
         fullName,
-        avatar: avatar.url,
-        coverImage: coverImage?.url || "",
+        avatar: {
+            url: avatar.url,
+            public_id: avatar.public_id
+        },
+        coverImage: {
+            public_id: coverImage?.public_id || "",
+            url: coverImage?.secure_url || ""
+        },
         email,
         password,
         username: username.toLowerCase(),
@@ -166,7 +172,7 @@ const loginUser = asyncHandler( async (req, res) => {
         new ApiResponse(
             200, 
             {
-                user: loggedInUser, accessToken, refreshToken
+                user: loggedInUser //accessToken, refreshToken
             },
             "User logged In Successfully"
         )
@@ -253,7 +259,7 @@ const refreshAccessToken = asyncHandler( async (req, res) => {
             )
         )
     } catch (error) {
-        console.error("❌ Refresh token error:", error);
+        console.error("Refresh token error:", error);
         throw new ApiError(error?.message || "Invalid refresh Token")
     }
 } )
@@ -278,13 +284,16 @@ const changeCurrentUserPassword = asyncHandler( async (req, res) => {
 })
 
 const getCurrentUser = asyncHandler(async (req, res) => {
+    if (!req.user) {
+        throw new ApiError(200, "User not Found")
+    }
     return res.status(200)
-    .json(new ApiResponse(200, {}, "Current user fetchedd successfully"))
+    .json(new ApiResponse(200, req.user, "Current user fetchedd successfully"))
 })
 
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
-    const {fullName, email} = req.body
+    const {fullName, email, username} = req.body
     
     if (!fullName || !email) {
         throw new ApiError(400, "All fields are required")
@@ -295,7 +304,8 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
         {
             $set: {
                 fullName,
-                email
+                email,
+                username
             }
         },
         { new: true }
@@ -319,10 +329,7 @@ const updateUserAvatar = asyncHandler( async (req, res) => {
 
     // 2. If user has an existing avatar, delete it from Cloudinary
     if (user?.avatar) {
-        const publicId = getPublicIdFromUrl(user.avatar)
-        if (publicId) {
-            await cloudinary.uploader.destroy(publicId)
-        }
+        await deleteOnCloudinary(user.avatar.public_id)
     }
 
     // 3. Upload new avatar to Cloudinary
@@ -338,7 +345,10 @@ const updateUserAvatar = asyncHandler( async (req, res) => {
         req.user?._id,
         { 
             $set: {
-                avatar: avatar.url
+                avatar: {
+                    url: avatar.url,
+                    public_id: avatar.public_id
+                }
             }
         },
         { new: true }
@@ -346,7 +356,7 @@ const updateUserAvatar = asyncHandler( async (req, res) => {
 
     return res.status(200)
     .json(
-        new ApiResponse(200, updatedAvatarImage, "Avatar image updated successdfully")
+        new ApiResponse(200, updatedAvatarImage, "Avatar image updated successfully")
     )
 })
 
@@ -355,30 +365,30 @@ const updateUserCoverIMage = asyncHandler( async (req, res) => {
     const coverImageLocalPath = req.file?.path
     
     if (!coverImageLocalPath) {
-        throw new ApiError(400, "Avatar file is missing")
+        throw new ApiError(400, "Cover Image file is missing")
     }
       // 1. Get the current user from DB
     const user = await User.findById(req.user?._id)
 
     // 2. If user has an existing coverImage, delete it from Cloudinary
     if (user?.coverImage) {
-        const publicId = getPublicIdFromUrl(user.coverImage)
-        if (publicId) {
-            await cloudinary.uploader.destroy(publicId)
-        }
+        await deleteOnCloudinary(user.coverImage.public_id)
     }
 
     const coverImage = await uploadOnCloudinary(coverImageLocalPath)
 
     if (!coverImage.url) {
-        throw new ApiError(400, "Error while uploading on avatar")
+        throw new ApiError(400, "Error while uploading on coverImage")
     }
 
     const updatedCoverImage = await User.findByIdAndUpdate(
         req.user?._id,
         { 
             $set: {
-                coverImage: coverImage.url
+                coverImage: {
+                    url: coverImage.url,
+                    public_id: coverImage.public_id
+                }
             }
         },
         { new: true }
@@ -417,7 +427,7 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
             $lookup: {
                 from: "subscriptions",
                 localField: "_id",
-                foreignField: "subsciber",
+                foreignField: "subscriber",
                 as: "subscribedTo"
             }
         },
@@ -443,11 +453,14 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
                 fullName: 1,
                 username: 1,
                 email: 1,
+                password: 1,
                 subscribersCount: 1,
                 channelsSubscribedToCount: 1,
                 isSubscribed: 1,
                 avatar: 1,
-                coverImage: 1
+                coverImage: 1,
+                subscribedTo: 1,
+                subscribers: 1
             }
         }
     ])
@@ -473,6 +486,9 @@ const getWatchHistory = asyncHandler( async (req, res) => {
             }
         },
         {
+            $unwind: "$watchHistory"  // break each {video, watchedAt} into separate docs
+        },
+        {
             // $lookup used to get data form another model or join another model to our model so we can get data
             $lookup: {
                 from: "videos",  // this field take collection or model_name as value which we want to join
@@ -492,7 +508,8 @@ const getWatchHistory = asyncHandler( async (req, res) => {
                                     $project: {
                                         username: 1,
                                         fullName: 1,
-                                        email: 1
+                                        email: 1,
+                                        avatar: 1
                                     }
                                 }
                             ]
@@ -508,7 +525,21 @@ const getWatchHistory = asyncHandler( async (req, res) => {
                     }
                 ]
             }
-        }
+        },
+        // {
+        //     $addFields: {
+        //         video: { $first: "$video" },
+        //         watchedAt: "$watchHistory.watchedAt",
+        //     },
+        // },
+        // {
+        //     $project: {
+        //         _id: 0,
+        //         video: 1,
+        //         watchedAt: 1,
+        //     },
+        // },
+        // { $sort: { watchedAt: -1 } }, // newest first
     ])
 
     if (!user || user.length === 0) {
@@ -519,7 +550,7 @@ const getWatchHistory = asyncHandler( async (req, res) => {
     .json(
         new ApiResponse(
             200,
-            user[0].watchHistory,
+            user,
             "Watch history fetched successfully"
         )
     )
@@ -538,3 +569,40 @@ export {
     getUserChannelProfile,
     getWatchHistory
 }
+
+//  output of getCurrentUser for path: http://localhost:8000/api/v1/user/current-user
+// {
+//   "statusCode": 200,
+//   "message": "Current user fetchedd successfully",
+//   "data": {
+//     "_id": "6826f66c4fe0436991c7e6a7",
+//     "username": "one",
+//     "email": "hello@gmail.com",
+//     "fullName": "hello",
+//     "avatar": "http://res.cloudinary.com/dqynbwfx7/image/upload/v1750875333/videotube/pz96qxm97nwxeqbp5znk.png",
+//     "coverImage": "http://res.cloudinary.com/dqynbwfx7/image/upload/v1758395626/videotube/ffewr4ijcy7phid6d2yy.png",
+//     "watchHistory": [],
+//     "createdAt": "2025-05-16T08:25:16.205Z",
+//     "updatedAt": "2025-10-03T16:58:15.660Z",
+//     "__v": 0
+//   },
+//   "success": true
+// }
+
+// output of getUserChannelProfile for path: http://localhost:8000/api/v1/user/c/one 
+// {
+//   "statusCode": 200,
+//   "message": "User channel fetched successfully",
+//   "data": {
+//     "_id": "6826f66c4fe0436991c7e6a7",
+//     "username": "one",
+//     "email": "hello@gmail.com",
+//     "fullName": "hello",
+//     "avatar": "http://res.cloudinary.com/dqynbwfx7/image/upload/v1750875333/videotube/pz96qxm97nwxeqbp5znk.png",
+//     "coverImage": "http://res.cloudinary.com/dqynbwfx7/image/upload/v1758395626/videotube/ffewr4ijcy7phid6d2yy.png",
+//     "subscribersCount": 1,
+//     "channelsSubscribedToCount": 1,
+//     "isSubscribed": false
+//   },
+//   "success": true
+// }

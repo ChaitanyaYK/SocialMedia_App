@@ -25,16 +25,29 @@ const userSchema = new Schema({
         index: true
     },
     avatar: {
-        type: String,   // cloudinary url
+        type: {
+            url: String,
+            public_id: String  // cloudinary url
+        },   
         required: true
     },
     coverImage: {
-        type: String   // cloudinary url
+        type: {
+            url: String,
+            public_id: String  // cloudinary url
+        },
     },
     watchHistory: [
         {
-            type: Schema.Types.ObjectId,
-            ref: "Video"
+
+            video: {
+                type: Schema.Types.ObjectId,
+                ref: "Video"
+            },
+            watchedAt: {
+                type: Date,
+                default: Date.now
+            }
         }
     ],
     password: {
@@ -88,4 +101,6 @@ userSchema.methods.generateRefreshToken = function() {
     )
 }
 
+userSchema.index({username: 1, createdAt: -1})
+userSchema.index({email: 1, createdAt: -1})
 export const User = mongoose.model("User", userSchema)

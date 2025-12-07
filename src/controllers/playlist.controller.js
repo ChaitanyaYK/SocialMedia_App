@@ -1,12 +1,13 @@
 import mongoose, {isValidObjectId} from "mongoose"
 import {Playlist} from "../models/playlist.model.js"
+import { Video } from "../models/video.model.js"
 import {ApiError} from "../utils/ApiError.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 import {asyncHandler} from "../utils/asyncHandler.js"
 
 
 const createPlaylist = asyncHandler(async (req, res) => {
-    const {name, description} = req.body;
+    const {name, description=null} = req.body;
 
     // TODO: create playlist
 
@@ -20,8 +21,8 @@ const createPlaylist = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid video Id");
     }
 
-    if (!name || !description) {
-        throw new ApiError(400, "Name and description are required")
+    if (!name) {
+        throw new ApiError(400, "Playlist Name is required")
     }
     
     const playlist = await Playlist.create({
@@ -31,7 +32,7 @@ const createPlaylist = asyncHandler(async (req, res) => {
     })
 
     const createdPlaylist = await Playlist.findById(playlist._id).select(
-        "-video"
+        "video"
     )
 
     return res.status(200)
@@ -52,26 +53,18 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
 
-    // const [playlist, total]  = await Promise.all([
-    //     Playlist.findById({owner: userId}).populate("videos").skip(skip).limit(parseInt(limit))
-    // ])
-                // Or code for above code
     const pipeline = [
         {
             $match: {
                 owner: new mongoose.Types.ObjectId(userId),
-                $or: [
-                    { name: { $regex: search, $options: "i" } },
-                    { description: { $regex: search, $options: "i" } }
-                ]
             }
         },
         {
             $lookup: {
                 from: "videos",
-                localField: "video",
+                localField: "videos",
                 foreignField: "_id",
-                as: "video",
+                as: "videos",
                 pipeline: [
                     {
                         $project: {
@@ -91,9 +84,9 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
         {
             $addFields: {
                 // video: { $first: "$video" },
-                coverVideo: { $arrayElemAt: ["$video", 0 ]},
+                coverVideo: { $arrayElemAt: ["$videos", 0 ]},
                 totalVideos: {
-                    $size: "$video"
+                    $size: "$videos"
                 }
             }
         },
@@ -120,15 +113,15 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
     ])
 
     const totalPlaylists = total[0]?.total || 0;
-    if (playlists.toString() !== req.user?._id) {
-        throw new ApiError(403, "you are not authorized to fetched playlist")
-    }
+    // if (playlists.toString() !== req.user?._id) {
+    //     throw new ApiError(403, "you are not authorized to fetched playlist")
+    // }
 
     return res.status(200).json(new ApiResponse(200, { 
             playlists, 
             totalPlaylists,
             page: parseInt(page),
-            totalPages: Math.ceil(total / limit)
+            totalPages: Math.ceil(totalPlaylists / limit)
         }, "user playlist fetched succesfully")
     )
 })
@@ -148,10 +141,6 @@ const getPlaylistById = asyncHandler(async (req, res) => {
         {
             $match: {
                 owner: new mongoose.Types.ObjectId(playlistId),
-                $or: [
-                    { name: { $regex: search, $options: "i" } },
-                    { description: { $regex: search, $options: "i" } }
-                ]
             }
         },
         {
@@ -164,7 +153,7 @@ const getPlaylistById = asyncHandler(async (req, res) => {
         },
         {
             $addFields: {
-                video: { $first: "$video" },
+                // video: { $first: "$video" },
                 countTotalVideo: {
                     $size: "$video"
                 }
@@ -180,33 +169,28 @@ const getPlaylistById = asyncHandler(async (req, res) => {
         throw new ApiError(403, "you are not authorized to fetched playlist")
     }
 
-    return res.status(200).json(200, playlists[0], "playlist fetched succesfully")
+    return res.status(200).json(200, playlists, "playlist fetched succesfully")
 })
 
 
 const addVideoToPlaylist = asyncHandler(async (req, res) => {
     const {playlistId, videoId} = req.params;
 
-    if (!playlistId || !isValidObjectId(playlistId) || !isValidObjectId(videoId)) {
-        throw new ApiError(400, "Invalid playlist or video Id");
+    if (!playlistId || !isValidObjectId(playlistId)) {
+        throw new ApiError(400, "Invalid playlist Id");
     }
 
+    if (!videoId || !isValidObjectId(videoId)) {
+        throw new ApiError(400, "Invalid video Id");
+    }
     
-    // const playlist = await Playlist.find({_id: playlistId})
-    // .populate("video", videoId, "-videoFile")
-    // .limit(parseInt(limit))
-    // .sort(sortBy)
-    // .skip((parseInt(page) - 1) * parseInt(limit))
-    
-    // const playlist = await Playlist.findById(playlistId)
-                    //Or code for above one line
-    const [playlist, video] = await Promise.all([
+    const [playlist, videos] = await Promise.all([
         Playlist.findById(playlistId),
-        VideoColorSpace.findById(videoId)
+        Video.findById(videoId)
     ])
     
     if (!playlist) throw new ApiError(404, "playlist not found");
-    if (!video) throw new ApiError(404, "Video not found");
+    if (!videos) throw new ApiError(404, "Video not found");
 
     if (!playlist.owner.equals(req.user._id)) {
         throw new ApiError(403, "You are not authorized to modify this playlist")
@@ -217,10 +201,10 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
     }  
     
     playlist.video.push(videoId)
-    await playlist.save()
+    await playlist.save({validatateBeforeSave: true})
 
     return res.status(200)
-    .json(new ApiResponse(200, playlist[0], "Video added to playlist successfully"))
+    .json(new ApiResponse(200, playlist, "Video added to playlist successfully"))
 })
 
 
@@ -235,25 +219,27 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid video Id");
     }
 
-    const playlist = await Playlist.findById(playlistId)
+    const playlist = await Playlist.findById(playlistId);
 
     if (!playlist) {
-        throw new ApiError(404, "playlist not found")
+        throw new ApiError(404, "playlist not found");
     }
 
     if (!playlist.owner.equals(req.user._id)) {
         throw new ApiError(403, "you are not authorized to delete playlist")
     }
 
+    
+
     playlist.video = playlist.video.filter(
         (id) => id.toString() !== videoId
     )
 
     await Playlist.video.findByIdAndDelete(videoId)
-    await playlist.save()
+    await playlist.save({validatateBeforeSave: false})
 
     return res.status(200)
-    .json(new ApiResponse(200, playlist[0], "video is remove from playlist successfully"))
+    .json(new ApiResponse(200, playlist, "video is remove from playlist successfully"))
 })
 
 
@@ -317,7 +303,7 @@ const updatePlaylist = asyncHandler(async (req, res) => {
     }
 
     return res.status(200)
-    .json(new ApiResponse(200, playlist[0], "playlist updated successfully"))
+    .json(new ApiResponse(200, playlist, "playlist updated successfully"))
 })
 
 

@@ -3,7 +3,26 @@ import {Like} from "../models/like.model.js"
 import {ApiError} from "../utils/ApiError.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 import {asyncHandler} from "../utils/asyncHandler.js"
+// // Create a Reusable Toggle function
+// const toggleLike = async ({ entityId, entityType, userId }) => {
+//     let query = {};
+//     query[entityType] = entityId;
 
+//     const existingLike = await Like.findOne({ ...query, likedBy: userId });
+
+//     if (existingLike) {
+//         await existingLike.deleteOne();
+//         const likeCount = await Like.countDocuments(query);
+//         return { liked: false, likeCount };
+//     }
+
+//     await Like.create({ ...query, likedBy: userId });
+//     const likeCount = await Like.countDocuments(query);
+//     return { liked: true, likeCount };
+// };
+
+// // Uses :- return this result in responce directly
+// // const result = await toggleLike({ entityId: videoId, entityType: "video", userId });
 
 const toggleVideoLike = asyncHandler(async (req, res) => {
     const {videoId} = req.params
@@ -19,19 +38,24 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
 
     if (isLiked) {
        await isLiked.deleteOne();
-       return res.status(200).json(new ApiResponse(200, {}, "Video disliked successfully"))
+
+       const likeCount = await Like.countDocuments({video: videoId});
+
+       return res.status(200).json(new ApiResponse(200, {liked: false, likeCount}, "Video disliked successfully"))
     }
 
-    const newLike = await Like.create({ video: videoId, likedBy: userId });
+    await Like.create({ video: videoId, likedBy: userId });
+
+    const likeCount = await Like.countDocuments({video: videoId});
 
     return res.status(201)
-    .json(new ApiResponse(200, newLike, "Video liked successfully"))
+    .json(new ApiResponse(200, {liked: true, likeCount}, "Video liked successfully"))
     
 })
 
 
 const toggleCommentLike = asyncHandler(async (req, res) => {
-    const {commentId} = req.params
+    const {commentId} = req.params;
     //TODO: toggle like on comment
 
     const userId = req.user?._id;
@@ -48,13 +72,18 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
 
     if (likedComment) {
         await likedComment.deleteOne()
-        return res.status(200).json(new ApiResponse(200, {}, "Comment disliked successfully"))
+
+        const likeCount = await Like.countDocuments({comment: commentId});
+
+        return res.status(200).json(new ApiResponse(200, { liked: false, likeCount }, "Comment disliked successfully"))
     }
 
-    const newLike = await Like.create({ comment: commentId, likedBy: userId });
+    await Like.create({ comment: commentId, likedBy: userId });
+
+    const likeCount = await Like.countDocuments({comment: commentId});
 
     return res.status(201)
-    .json(new ApiResponse(200, newLike, "Comment liked successfully"))
+    .json(new ApiResponse(200, {liked: true, likeCount}, "Comment liked successfully"))
 })
 
 
@@ -75,13 +104,18 @@ const toggleTweetLike = asyncHandler(async (req, res) => {
    
     if (isLike) {
         await isLike.deleteOne();
-        return res.status(200).json(new ApiResponse(200, {}, "Tweet disliked successfully"))
+
+        const likeCount = await Like.countDocuments({tweet: tweetId});
+
+        return res.status(200).json(new ApiResponse(200, { liked: false, likeCount }, "Tweet disliked successfully"));
     }
 
     const newLike = await Like.create({tweet: tweetId, likedBy: userId})
+
+    const likeCount = await Like.countDocuments({tweet: tweetId})
     
     return res.status(201)
-    .json(new ApiResponse(201, newLike, "Tweet liked successfully"))
+    .json(new ApiResponse(201, {liked: true, likeCount}, "Tweet liked successfully"))
 })
 
 
@@ -151,8 +185,22 @@ const getLikedVideos = asyncHandler(async (req, res) => {
             }
         },
         {
+            $lookup: {
+                from: "likes",
+                localField: "_id",
+                foreignField: "video",
+                as: "videoLikes"
+            }
+        },
+        {
+            $addFields: {
+                likeCount: { $size: "$videoLikes" }
+            }
+        },
+        {
             $project: {
                 _id: 1,
+                likeCount: 1,
                 likedBy: {
                     _id: 1,
                     username: 1
@@ -231,7 +279,19 @@ const getLikedComments =  asyncHandler(async (req, res) => {
                commentOwner: {$first: "$commentOwner"}
             }
         },
-        
+        {
+            $lookup: {
+                from: "likes",
+                localField: "comments._id",
+                foreignField: "comment",
+                as: "commentLikes"
+            }
+        },
+        {
+            $addFields: {
+                likeCount: { $size: "$commentLikes"}
+            }
+        },
         { $sort: sortStage},
         { $skip: skip},
         { $limit: parseInt(limit)},
@@ -243,6 +303,7 @@ const getLikedComments =  asyncHandler(async (req, res) => {
                     content: "$comments.content",
                     createdAt: "$comments.createdAt",
                     updatedAt: "$comments.updatedAt",
+                    likeCount: "$likeCount",
                     owner: {
                         _id: "$commentOwner._id",
                         username: "$commentOwner.username",
@@ -313,6 +374,19 @@ const getLikedTweets =  asyncHandler(async (req, res) => {
                 tweetOwner: { $first: "$tweetOwner" }
             }
         },
+        {
+            $lookup: {
+                from: "likes",
+                localField: "tweet._id",
+                foreignField: "tweet",
+                as: "tweetLikes"
+            }
+        },
+        {
+            $addFields: {
+                likeCount: {$size: "$tweetLikes"}
+            }
+        },
         { $sort: sortStage},
         { $skip: skip},
         { $limit: parseInt(limit)},
@@ -324,6 +398,7 @@ const getLikedTweets =  asyncHandler(async (req, res) => {
                     content: "$tweet.content",
                     createdAt: "$tweet.createdAt",
                     updatedAt: "$tweet.updatedAt",
+                    likeCount: "$likeCount",
                     owner: {
                         _id: "$tweetOwner._id",
                         username: "$tweetOwner.username",

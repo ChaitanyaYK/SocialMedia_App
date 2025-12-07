@@ -22,4 +22,7 @@ const likeSchema = new Schema({
     timestamps: true
 })
 
-export  const Like = mongoose.model("Like", likeSchema)
+likeSchema.index({comment: 1, createdAt: -1})
+likeSchema.index({video: 1, createdAt: -1})
+likeSchema.index({tweet: 1, createdAt: -1})
+export const Like = mongoose.model("Like", likeSchema)
