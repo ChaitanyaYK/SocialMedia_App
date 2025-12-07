@@ -11,7 +11,7 @@ const getChannelStats = asyncHandler(async (req, res) => {
     const {channelId} = req.params;
 
     if (!channelId || !isValidObjectId(channelId)) {
-        throw new ApiError(400, "Invalid channel ID")
+        throw new ApiError(400, "Invalid channel ID");
     }
 
     const videoStats = await Video.aggregate([

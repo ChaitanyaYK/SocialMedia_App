@@ -254,7 +254,7 @@ const getLikedComments =  asyncHandler(async (req, res) => {
     const liked = await Like.aggregate([
         {
             $match: {
-                likedBy: mongoose.Types.ObjectId(userId),
+                likedBy: new mongoose.Types.ObjectId(userId),
                 comment: {$ne: null}
             }
         },
@@ -265,6 +265,9 @@ const getLikedComments =  asyncHandler(async (req, res) => {
                 foreignField: "_id",
                 as: "comments",
             }
+        },
+        {
+            $unwind: "$comments"
         },
         {
             $lookup: {
@@ -346,7 +349,7 @@ const getLikedTweets =  asyncHandler(async (req, res) => {
     const liked = await Like.aggregate([
         {
             $match: {
-                likedBy: mongoose.Types.ObjectId(userId),
+                likedBy: new mongoose.Types.ObjectId(userId),
                 tweet: {$ne: null}
             }
         },

@@ -20,7 +20,7 @@ const toggleSubscription = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid channel Id");
     }
 
-    if (req.user._id.toString() === channelId) {
+    if (userId.toString() === channelId) {
         throw new ApiError(400, "You cannot subscribe to yourself");
     }
 
@@ -96,7 +96,7 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
 // controller to return channel list to which user has subscribed
 const getSubscribedChannels = asyncHandler(async (req, res) => {
     const { subscriberId } = req.params;
-    const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = -1} = req.query;
+    const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = -1 } = req.query;
 
     if (!subscriberId || !isValidObjectId(subscriberId)) {
         throw new ApiError(400, "Invalid subscriber Id");
@@ -132,7 +132,7 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
 
     const total = await Subscription.countDocuments({ subscriber: subscriberId})
     return res.status(200)
-    .json(new ApiResponse(200,  {subscription: subscribedChannels, total}, "All Subscribed Channels by user fetched successfully"));
+    .json(new ApiResponse(200, {subscription: subscribedChannels, total}, "All Subscribed Channels by user fetched successfully"));
 })
 
 export {
@@ -205,7 +205,8 @@ export {
 //     "success": true
 // }
 
-// Output of toggleSubscription when unSubscribed
+
+//   output of toggleSubscription
 // {
 //     "statusCode": 200,
 //     "message": "Channel unsubscribed successfully",
@@ -227,6 +228,38 @@ export {
 //             "__v": 0
 //         },
 //         "subscribed": true
+//     },
+//     "success": true
+// }
+
+
+// output of getSubscribedChannels
+// {
+//     "statusCode": 200,
+//     "message": "All Subscribed Channels by user fetched successfully",
+//     "data": {
+//         "subscription": [
+//             {
+//                 "_id": "68e2ce702326020cb3aee04b",
+//                 "subscriber": "682659b27780ef0a132de1b2",
+//                 "channel": {
+//                     "_id": "6826f66c4fe0436991c7e6a7",
+//                     "username": "one",
+//                     "email": "hello@gmail.com",
+//                     "fullName": "hello",
+//                     "avatar": "http://res.cloudinary.com/dqynbwfx7/image/upload/v1750875333/videotube/pz96qxm97nwxeqbp5znk.png",
+//                     "coverImage": "http://res.cloudinary.com/dqynbwfx7/image/upload/v1758395626/videotube/ffewr4ijcy7phid6d2yy.png",
+//                     "watchHistory": [],
+//                     "createdAt": "2025-05-16T08:25:16.205Z",
+//                     "updatedAt": "2025-10-05T19:36:01.223Z",
+//                     "__v": 0
+//                 },
+//                 "createdAt": "2025-10-05T20:00:48.029Z",
+//                 "updatedAt": "2025-10-05T20:00:48.029Z",
+//                 "__v": 0
+//             }
+//         ],
+//         "total": 1
 //     },
 //     "success": true
 // }
