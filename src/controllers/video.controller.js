@@ -132,7 +132,7 @@ const getAllVideos = asyncHandler(async (req, res) => {
     // you can include field mapppings in search index eg.title, description, as well
     // Field mappings specify which fields within your documents should be indexed for text search.
     // this helps in seraching only in title, desc providing faster search results
-    // here the name of search index is 'search-videos'
+    // here the name of search index is 'searchVideos'
 
     // Search using MongoDB Search
     if (query) {

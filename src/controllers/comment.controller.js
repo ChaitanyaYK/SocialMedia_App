@@ -3,11 +3,13 @@ import {Comment} from "../models/comment.model.js"
 import {ApiError} from "../utils/ApiError.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 import {asyncHandler} from "../utils/asyncHandler.js"
+import { User } from "../models/user.model.js"
+import {Video} from "../models/video.model.js"
 
 
+// get all comments for a video
 const getVideoComments = asyncHandler(async (req, res) => {
     const {page = 1, limit = 10, query = "", sortBy = "newest"} = req.query;
-    //TODO: get all comments for a video
     const {videoId} = req.params;
     
     if (!isValidObjectId(videoId)) {
@@ -32,8 +34,9 @@ const getVideoComments = asyncHandler(async (req, res) => {
     const commentAggregate = await Comment.aggregate([
         {
             $match: {
-                    video: new mongoose.Types.ObjectId(videoId) ,
-                    ...(query ? { content: { $regex: query, $options: "i"} } : {})
+                video: new mongoose.Types.ObjectId(videoId) ,
+                parentComment: null,
+                // ...(query ? { content: { $regex: query, $options: "i"} } : {})
             }
         },
         {   // $facet is used to return totalCount in same query
@@ -45,13 +48,7 @@ const getVideoComments = asyncHandler(async (req, res) => {
                            localField: "owner",
                            foreignField: "_id",
                            as: "owner",
-                           pipeline: [
-                                { $project: { username: 1, avatar: 1 } }
-                           ]
                        }  
-                    },
-                    {
-                        $addFields: { owner: { $first: "$owner" } }
                     },
                     {
                         $lookup: {
@@ -63,6 +60,7 @@ const getVideoComments = asyncHandler(async (req, res) => {
                     },
                     {
                         $addFields: {
+                            owner: { $first: "$owner" },
                             likeCount: { $size: "$likes" },
                             isLiked: {
                                 $in: [req.user._id, "$likes.likedBy"]
@@ -82,13 +80,7 @@ const getVideoComments = asyncHandler(async (req, res) => {
                                         localField: "owner",
                                         foreignField: "_id",
                                         as: "owner",
-                                        pipeline: [
-                                            { $project: { username: 1, avatar: 1 } }
-                                        ]
                                     }
-                                },
-                                {
-                                    $addFields: { owner: { $first: "$owner" } }
                                 },
                                 {
                                     $lookup: {
@@ -100,6 +92,7 @@ const getVideoComments = asyncHandler(async (req, res) => {
                                 },
                                 {
                                     $addFields: {
+                                        owner: { $first: "$owner" },
                                         likeCount: { $size: "$likes" },
                                         isLiked: {
                                             $in: [req.user._id, "$likes.likedBy"]
@@ -109,7 +102,7 @@ const getVideoComments = asyncHandler(async (req, res) => {
                                 {
                                     $project: {
                                         content: 1,
-                                        owner: 1,
+                                        owner: { username: 1, avatar: 1 },
                                         likeCount: 1,
                                         isLiked: 1,
                                         createdAt: 1
@@ -121,7 +114,7 @@ const getVideoComments = asyncHandler(async (req, res) => {
                     {
                         $project: {
                             content: 1,
-                            owner: 1,
+                            owner: { username: 1, avatar: 1 },
                             likeCount: 1,
                             isLiked: 1,
                             replies: 1,
@@ -157,41 +150,107 @@ const getVideoComments = asyncHandler(async (req, res) => {
 })
 
 
+// add a comment to a video
 const addComment = asyncHandler(async (req, res) => {
-    // TODO: add a comment to a video
     const {videoId} = req.params;
     const {content} = req.body;
+    const userId = req.user?._id;
 
-    if (!mongoose.Types.ObjectId.isValid(videoId)) {
-        throw new ApiError(400, "Invalid video ID")
-    }
-
-    content = content?.trim();
-    if (!content) {
+    if (!content?.trim()) {
         throw new ApiError(400, "Comment content is required")
     }
 
+    const video = await Video.findById(videoId);
 
-    const newComment = await Comment.create({
+    if (!video) {
+        throw new ApiError(404, "Video not found")
+    }
+
+    const comment = await Comment.create({
         content,
         video: videoId,
-        owner: req.user._id
+        owner: userId,
     })
     
-    if (!newComment) {
-        throw new ApiError(500, "Error while creating the Comment");
+    if (!comment) {
+        throw new ApiError(500, "Failed to create Comment try again");
     }
-    
-    const populatedComment = await Comment.findById(newComment._id)
-        .populate("owner", "username avatar")
 
     return res.status(201)
-    .json(new ApiResponse(200, populatedComment, "Comment added successfully"))
+    .json(new ApiResponse(201, comment, "Comment added successfully"))
 })
 
 
+const addReply = asyncHandler(async (req, res) => {
+    // add replies to comment
+    const {commentId} = req.params;
+    const {content} = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(commentId)) {
+        throw new ApiError(400, "Invalid comment ID");
+    }
+
+    if (!content?.trim()) {
+        throw new ApiError(400, "content is required for update");
+    }
+
+    const parentComment = await Comment.findById(commentId);
+
+    if (!parentComment) {
+        throw new ApiError(404, "parent comment not found");
+    }
+
+    const reply = await Comment.create({
+        content,
+        video: parentComment.video,
+        owner: req.user._id,
+        parentComment: commentId,
+    })
+
+    if (!reply) {
+        throw new ApiError(500, "Failed to add reply try again");
+    }
+
+    const populateReply = await Comment.findById(reply._id)
+        .populate("owner", "username avatar");
+
+    return res.status(200).json(new ApiResponse(200, populateReply, "Reply Added to comment successfully"));
+})
+
+
+const fetchReplies = asyncHandler(async (req, res) => {
+    const {commentId} = req.params;
+    const page = 1;
+
+    if (!mongoose.Types.ObjectId.isValid(commentId)) {
+        throw new ApiError(400, "Invalid comment ID");
+    }
+
+    const comment = await Comment.findById(commentId);
+
+    if (!comment) {
+        throw new ApiError(404, "parent comment not found");
+    }
+
+    // const replies = await Comment
+    const replies = await Comment.find({
+        parentComment: commentId
+    })
+    .populate("owner", "username avatar")
+    .sort({createdAt: 1})
+    .limit(10)
+    .skip((page - 1) * 10);
+
+
+    if (!replies) {
+        throw new ApiError(500, "Failed to reply comment please try again");
+    }
+
+    res.status(200).json(new ApiResponse(200, replies, "Replies to Comment fetch successfully"));
+})
+
+// update a comment
 const updateComment = asyncHandler(async (req, res) => {
-    // TODO: update a comment
     const {commentId} = req.params;
     const {content} = req.body;
 
@@ -199,8 +258,7 @@ const updateComment = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid comment ID")
     }
 
-    content = content?.trim();
-    if (!content) {
+    if (!content?.trim()) {
         throw new ApiError(400, "content is required for update")
     }
 
@@ -214,19 +272,27 @@ const updateComment = asyncHandler(async (req, res) => {
         throw new ApiError(403, "You are not authorized to update this comment");
     }
 
-    comment.content = content;
-    await comment.save();
+    const updatedComment = await Comment.findByIdAndUpdate(
+        comment._id,
+        {
+            $set: {
+                content,
+            }
+        },
+        { new: true }
+    )
 
-    const updatedComment = await Comment.findById(commentId)
-        .populate("owner", "username avatar")
+    if (!updatedComment) {
+        throw new ApiError(500, "Failed to edit comment please try again")
+    }
 
     return res.status(200)
     .json(new ApiResponse(200, updatedComment, "Comment Updated successfully"))
 })
 
 
+// delete a comment
 const deleteComment = asyncHandler(async (req, res) => {
-    // TODO: delete a comment
     const {commentId} = req.params
     
     if (!mongoose.Types.ObjectId.isValid(commentId)) {
@@ -243,22 +309,27 @@ const deleteComment = asyncHandler(async (req, res) => {
         throw new ApiError(403, "You are not authorized to delete this comment");
     }
 
-    await comment.deleteMany({
-        $or: [
-            { _id: commentId },
-            {parentComment: commentId }
-        ]
+    
+    await Comment.deleteMany({parentComment: commentId});
+    
+    await Comment.findByIdAndDelete(commentId);
+    
+    await Comment.deleteMany({
+        comment: commentId,
+        likeBy: req.user
     });
 
     return res.status(200)
-    .json(new ApiResponse(200, {}, "Comment Deleted successfully"))
+    .json(new ApiResponse(200, {commentId}, "Comment Deleted successfully"))
 })
 
 export {
     getVideoComments, 
     addComment, 
     updateComment,
-    deleteComment
+    deleteComment,
+    addReply,
+    fetchReplies
 }
 
 
