@@ -20,29 +20,22 @@ const toggleSubscription = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid channel Id");
     }
 
-    if (userId.toString() === channelId) {
-        throw new ApiError(400, "You cannot subscribe to yourself");
-    }
-
-    const existSubscription = await Subscription.findOne({
+    const isSubscription = await Subscription.findOne({
         subscriber: userId, 
         channel: channelId
     })
     
-    let subscribed;
-    if (existSubscription) {
-        await Subscription.deleteOne({ _id: existSubscription._id})
-        subscribed = false;
-        return res.status(200).json(new ApiResponse(200, subscribed, "Channel unsubscribed successfully"))
+    if (isSubscription) {
+        await Subscription.findByIdAndDelete({ _id: isSubscription._id});
+        return res.status(200).json(new ApiResponse(200, { subscribed: false }, "Channel unsubscribed successfully"))
     }
 
     const newSubscription = await Subscription.create({
         subscriber: req.user?._id,
         channel: channelId
     })
-    subscribed = true;
     
-    return res.status(200).json(new ApiResponse(200, {subscription: newSubscription, subscribed: true}, "Channel subscribed successfully"))
+    return res.status(200).json(new ApiResponse(200, { subscribed: true }, "Channel subscribed successfully"))
 })
 
 
@@ -69,17 +62,19 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
                 from: "users",
                 localField: "subscriber",
                 foreignField: "_id",
-                as: "subscriber"
+                as: "subscriber",
             }
+        },
+        {
+            $unwind: "$subscriber"
         },
         {
             $project: {
-                password: 0,
-                refreshToken: 0
+                _id: "$subscriber._id",
+                username: "$subscriber.username",
+                avatar: "$subscriber.avatar",
+                fullName: "$subscriber.fullName",
             }
-        },
-        {
-            $addFields: { subscriber: { $first: "$subscriber" } }
         },
         { $sort : sortBy },
         { $skip: (parseInt(page) - 1) * parseInt(limit)},
@@ -94,46 +89,185 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
 
 
 // controller to return channel list to which user has subscribed
+// const getSubscribedChannels = asyncHandler(async (req, res) => {
+//     const { subscriberId } = req.params;
+//     const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = -1 } = req.query;
+
+//     if (!subscriberId || !isValidObjectId(subscriberId)) {
+//         throw new ApiError(400, "Invalid subscriber Id");
+//     }
+
+//     const subscribedChannels = await Subscription.aggregate([
+//         {
+//             $match: {
+//                 subscriber: new mongoose.Types.ObjectId(subscriberId)
+//             }
+//         },
+//         {
+//             $lookup: {
+//                 from: "users",
+//                 localField: "channel",
+//                 foreignField: "_id",
+//                 as: "subscribedChannels",
+//                 pipeline: [
+//                     {
+//                         $lookup: {
+//                             from: "videos",
+//                             localField: "_id",
+//                             foreignField: "owner",
+//                             as: "videos",
+//                         },
+//                     },
+//                     {
+//                         $addFields: {
+//                             channelVideo: {
+//                                 $last: "$videos",
+//                             },
+//                         },
+//                     },
+//                 ]
+//             }
+//         },
+//         {
+//             $unwind: "$subscribedChannels"
+//         },
+//         {
+//             $project: {
+//                 _id: 0,
+//                 subscribedChannels: {
+//                     _id: 1,
+//                     username: 1,
+//                     fullName: 1,
+//                     avatar: 1,
+//                     channelVideo: {
+//                         _id: 1,
+//                         videoFile: 1,
+//                         "thumbnail.url": 1,
+//                         owner: 1,
+//                         title: 1,
+//                         description: 1,
+//                         createdAt: 1,
+//                         views: 1,
+//                         duration: 1
+//                     }
+
+//                 }
+//             }
+//         },
+//         { $sort : {[sortBy]: parseInt(sortOrder)} },
+//         { $skip: (parseInt(page) - 1) * parseInt(limit)},
+//         { $limit: parseInt(limit)}
+//     ])
+
+//     const total = await Subscription.countDocuments({ subscriber: subscriberId})
+//     return res.status(200)
+//     .json(new ApiResponse(200, {subscription: subscribedChannels, total}, "All Subscribed Channels by user fetched successfully"));
+// })
+
 const getSubscribedChannels = asyncHandler(async (req, res) => {
-    const { subscriberId } = req.params;
-    const { page = 1, limit = 10, sortBy = 'createdAt', sortOrder = -1 } = req.query;
+  const { subscriberId } = req.params;
+  const { page = 1, limit = 10 } = req.query;
 
-    if (!subscriberId || !isValidObjectId(subscriberId)) {
-        throw new ApiError(400, "Invalid subscriber Id");
-    }
+  if (!subscriberId || !isValidObjectId(subscriberId)) {
+    throw new ApiError(400, "Invalid subscriber Id");
+  }
 
-    const subscribedChannels = await Subscription.aggregate([
-        {
+  const subscribedChannels = await Subscription.aggregate([
+    {
+      $match: {
+        subscriber: new mongoose.Types.ObjectId(subscriberId),
+      },
+    },
+
+    // Join users (channels)
+    {
+      $lookup: {
+        from: "users",
+        let: { channelId: "$channel" },
+        pipeline: [
+          {
             $match: {
-                subscriber: new mongoose.Types.ObjectId(subscriberId)
-            }
-        },
-        {
-            $lookup: {
-                from: "users",
-                localField: "channel",
-                foreignField: "_id",
-                as: "channel"
-            }
-        },
-        {
-            $addFields: { channel: { $first: "$channel" } }
-        },
-        {
-            $project: {
-                "channel.password": 0,
-                "channel.refreshToken": 0
-            }
-        },
-        { $sort : {[sortBy]: parseInt(sortOrder)} },
-        { $skip: (parseInt(page) - 1) * parseInt(limit)},
-        { $limit: parseInt(limit)}
-    ])
+              $expr: { $eq: ["$_id", "$$channelId"] },
+            },
+          },
 
-    const total = await Subscription.countDocuments({ subscriber: subscriberId})
-    return res.status(200)
-    .json(new ApiResponse(200, {subscription: subscribedChannels, total}, "All Subscribed Channels by user fetched successfully"));
-})
+          // Get latest video of channel
+          {
+            $lookup: {
+              from: "videos",
+              let: { ownerId: "$_id" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: ["$owner", "$$ownerId"] },
+                  },
+                },
+                { $sort: { createdAt: -1 } },
+                { $limit: 1 },
+                {
+                  $project: {
+                    _id: 1,
+                    videoFile: 1,
+                    thumbnail: 1,
+                    title: 1,
+                    description: 1,
+                    views: 1,
+                    duration: 1,
+                    createdAt: 1,
+                  },
+                },
+              ],
+              as: "latestVideo",
+            },
+          },
+
+          {
+            $addFields: {
+              latestVideo: { $first: "$latestVideo" },
+            },
+          },
+
+          {
+            $project: {
+              _id: 1,
+              username: 1,
+              fullName: 1,
+              avatar: 1,
+              coverImage: 1,
+              latestVideo: 1,
+            },
+          },
+        ],
+        as: "subscribedChannel",
+      },
+    },
+
+    { $unwind: "$subscribedChannel" },
+
+    {
+      $project: {
+        _id: 0,
+        subscribedChannel: 1,
+      },
+    },
+
+    { $skip: (page - 1) * limit },
+    { $limit: parseInt(limit) },
+  ]);
+
+  const total = await Subscription.countDocuments({
+    subscriber: subscriberId,
+  });
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      { subscription: subscribedChannels, total },
+      "All Subscribed Channels by user fetched successfully"
+    )
+  );
+});
+
 
 export {
     toggleSubscription,

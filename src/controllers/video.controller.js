@@ -3,8 +3,8 @@ import { Video } from "../models/video.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import { uploadOnCloudinary, cloudinary, deleteOnCloudinary } from "../utils/cloudinary.js";
-import { getPublicIdFromUrl } from "../utils/deleteCloudinaryFile.js";
+import { cloudinary, uploadOnCloudinary, deleteOnCloudinary, thumbnailUploaded } from "../utils/cloudinary.js";
+// import { getPublicIdFromUrl } from "../utils/deleteCloudinaryFile.js";
 import { User } from "../models/user.model.js";
 import { Like } from "../models/like.model.js";
 import { Comment } from "../models/comment.model.js";
@@ -19,108 +19,30 @@ function formatDuration(seconds) {
     return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
-// const getAllVideos = asyncHandler(async (req, res) => {
-//     const { page = 1, limit = 10, query = "", sortBy = "newest", sortType = "desc", userId } = req.query
-//     //TODO: get all videos based on query, sort, pagination
+const getSignUrl = asyncHandler(async (req, res) => {
+    const {videoId} = req.params;
 
-    
-//     // // Build filter object
-//     // const filter = {
-//     //     isPublished: true, // Only published videos by default
-//     //     $or: [
-//     //         { title: { $regex: query, $options: "i" } },
-//     //         { description: { $regex: query, $options: "i" } }
-//     //     ]
-//     // };
-    
-//     // // if (userId && isValidObjectId(userId)) {
-//     // //     filter.owner = userId; // To fetch a specific user's videos
-//     // //     delete filter.isPublished; // Show all videos if it's owner viewing
-//     // // }
+    if (!mongoose.Types.ObjectId.isValid(videoId)) {
+        throw new ApiError(400, "Invaild videoId");
+    }
 
-//     // for using Full Text based search u need to create a search index in mongoDB atlas
-//     // you can include field mapppings in search index eg.title, description, as well
-//     // Field mappings specify which fields within your documents should be indexed for text search.
-//     // this helps in seraching only in title, desc providing faster search results
-//     // here the name of search index is 'search-videos'
+    const video = await Video.findById(videoId);
 
-//     if (!mongoose.Types.ObjectId.isValid(userId)) {
-//         throw new ApiError(400, "Invalid UserId");
-//     }
+    if (!video) {
+        throw new ApiError(404, "Video not found");
+    }
 
+    // const signedUrl = cloudinary.utils.sign_request(
+    //     {url: video.videoFile.hls_url},
+    //     process.env.CLOUDINARY_API_SECRET
+    // )
 
-//     // Build sort object
-//     let sort = {};
-//     if (sortBy === "oldest") sort = {createdAt: 1};
-//     else if(sortBy === "popular") sort = { views: -1 };
-//     else sort = {createdAt: -1};
+    // if (!signedUrl) {
+    //     throw new ApiError(500, "Error occured in creating signed url")
+    // }
 
-    
-
-//   // Pagination
-//     const skip = (parseInt(page) - 1) * parseInt(limit);
-  
-//         const videos = Video.aggregate([
-//             {
-//                 $search:{
-//                     index: "searchVideos",
-//                     text: {
-//                         query: query,
-//                         path: ["title", "description"]
-//                     }
-//                 }
-//             },
-//             {
-//                 $match: {
-//                     owner: new mongoose.Types.ObjectId(userId)
-//                 }
-//             },
-//             {$match: { isPublished: true }},
-//             {
-//                 $lookup: {
-//                     from: "users",
-//                     localField: "owner",
-//                     foreignField: "_id",
-//                     as: "ownerDetails",
-//                         pipeline: [
-//                             {
-//                                 $project: {
-//                                     username: 1,
-//                                     avatar: 1
-//                                 }
-//                             }
-//                         ]
-//                     }
-//             },
-//             {
-//                 $unwind: "$ownerDetails"
-//             },
-//             {$sort: sort},
-//             { $skip: skip }, { $limit: parseInt(limit) }
-//         ])
-
-
-//     // Count total matching videos
-//     const totalVideos = await Video.countDocuments({
-//             $or: [
-//                 { isPublished: true },
-//                 { owner: new mongoose.Types.ObjectId(userId) }
-//             ]
-//         });
-
-//     res.status(200).json(
-//         new ApiResponse(200, {
-//             videos,
-//             pagination: {
-//                 totalVideos,
-//                 page: parseInt(page),
-//                 limit: parseInt(limit),
-//                 totalPages: Math.ceil(page)
-//             }
-//         }, "Videos fetched successfully")
-//     );
-// });
-
+    res.status(200).json(new ApiResponse(200, { url: video.videoFile.hls_url }, "Video url fetch successfully"))
+})
 
 const getAllVideos = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, query = "", sortBy = "newest", userId = ""} = req.query;
@@ -177,15 +99,13 @@ const getAllVideos = asyncHandler(async (req, res) => {
     pipeline.push({ $skip: skip }, { $limit: parseInt(limit) });
 
     pipeline.push({
-        $lookup: {
-            from: "users",
-            localField: "owner",
-            foreignField: "_id",
-            as: "ownerDetails",
-            pipeline: [
-            { $project: { username: 1, avatar: 1 } }
-            ]
-        }
+            $lookup: {
+                from: "users",
+                localField: "owner",
+                foreignField: "_id",
+                as: "ownerDetails",
+                pipeline: [{ $project: { username: 1, avatar: 1 } }]
+            }
         },
         { $unwind: "$ownerDetails" }
     );
@@ -210,6 +130,7 @@ const getAllVideos = asyncHandler(async (req, res) => {
             page: parseInt(page),
             limit: parseInt(limit),
             totalPages: Math.ceil(totalVideos/limit),
+            sort
         }
         }, "Videos fetched successfully")
     );
@@ -236,50 +157,81 @@ const publishAVideo = asyncHandler(async (req, res) => {
         thumbnailLocalPath = req.files?.thumbnail?.[0]?.path;
     }
 
-    // console.log("FILES RECEIVED:", req.files);
-    // console.log("videoFile:", req.files?.videoFile);
-    // console.log("thumbnail:", req.files?.thumbnail);
 
      let videoUpload, thumbnailUpload;
     try {
         videoUpload = await uploadOnCloudinary(videoFileLocalPath);
 
         if (thumbnailLocalPath) {
-            thumbnailUpload = await uploadOnCloudinary(thumbnailLocalPath);
+            thumbnailUpload = await thumbnailUploaded(thumbnailLocalPath);
         }
     } catch (err) {
+        console.log("Cloudinary upload error", err);
+        
         throw new ApiError(500, "Error while uploading files to Cloudinary");
     }
 
-    // console.log("videoUpload:", videoUpload);
-    // console.log("thumbnailUpload:", thumbnailUpload);
 
-    const durationInSecond = videoUpload.duration;
-    const formattedDuration = formatDuration(durationInSecond);
-    console.log("Duration:", formattedDuration);
+    const formattedDuration = formatDuration(videoUpload.duration || 0);
 
     if (!videoUpload || !videoUpload.url) {
         throw new ApiError(500, "Error while uploading video files to Cloudinary");
     }
-    if (!thumbnailUpload || !thumbnailUpload.url) {
-        throw new ApiError(500, "Error while uploading thumbnail files to Cloudinary");
-    }
+    
+    // Here we create url in hls formate
+    const hlsUrl = await cloudinary.url(videoUpload.public_id, {
+            resource_type: "video",
+            // streaming_profile: "hd",
+            format: "m3u8",
+            transformation: [
+                {
+                aspect_ratio: "16:9",
+                crop: "fill",
+                gravity: "center"
+                }
+            ]
+    })
 
     const video = await Video.create({
         title,
         description,
         isPublished,
         videoFile: {
-            url: videoUpload.url,
-            public_id: videoUpload.public_id
+            public_id: videoUpload.public_id,
+            hls_url: hlsUrl,
+            type: "hls"
         },
         thumbnail: {
-            url: thumbnailUpload.url,
-            public_id: thumbnailUpload.public_id
+            url: thumbnailUpload?.url ?? null,
+            public_id: thumbnailUpload?.public_id ?? null,
         },
-        duration: formattedDuration,
+        duration: formattedDuration || 0,
         owner: req.user?._id
     })
+
+    // Generate poster if thumbnail is not given
+    if (!video.thumbnail?.url) {
+        const poster = cloudinary.url(
+            video.videoFile.public_id,
+            {
+                resource_type: "video",
+                format: "jpg",
+                 transformation: [
+                    {
+                    so: 1,
+                    aspect_ratio: "16:9",
+                    crop: "fill",
+                    gravity: "center",
+                    width: 640
+                    }
+                ]
+            }
+        ) 
+        video.thumbnail.url = poster;
+        video.thumbnail.public_id = video.videoFile.public_id;
+        await video.save();
+    }
+
 
     if (!video) {
         throw new ApiError(500, "Something went wrong while publishing the Video");
@@ -300,11 +252,19 @@ const getVideoById = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid videoId")
     }
 
-    if (!isValidObjectId(req.user?._id)) {
-        throw new ApiError(400, "Invalid userId")
+    const user = await User.findById(req.user?._id);
+
+    if (!user) {
+        throw new ApiError(401, "Unautherized Request");
     }
 
-    const video = await Video.aggregatePaginate([
+    const video = await Video.findById(videoId);
+
+    if (!video) {
+        throw new ApiError(404, "video not found")
+    }
+
+    const videoDetail = await Video.aggregatePaginate([
         {
             $match: {
                 _id: new mongoose.Types.ObjectId(videoId)
@@ -382,10 +342,10 @@ const getVideoById = asyncHandler(async (req, res) => {
         },
         {
             $project: {
-                "videoFile.url": 1,
+                videoFile: 1,
+                thumbnail: 1,
                 title: 1,
                 description: 1,
-                comment: 1,
                 likesCount: 1,
                 isLiked: 1,
                 views: 1,
@@ -396,8 +356,8 @@ const getVideoById = asyncHandler(async (req, res) => {
         }
     ])
 
-    if (!video) {
-        throw new ApiError(500, "failed to fetch video");
+    if (!videoDetail.docs.length) {
+        throw new ApiError(500, "failed to fetch video detail");
     }
 
     await Video.findByIdAndUpdate(videoId, {
@@ -406,11 +366,19 @@ const getVideoById = asyncHandler(async (req, res) => {
         }
     });
 
-    await User.findByIdAndUpdate(req.user?._id, {
-        $addToSet: {
-            watchHistory: new mongoose.Types.ObjectId(videoId)
-        }
+    // remove previous watched video if it is same video in watchHistory
+    user.watchHistory = user.watchHistory.filter(
+        (prev) => prev.video.toString() !== videoId
+    )
+
+    user.watchHistory.unshift({
+        video: videoId,
+        watchedAt: Date.now()
     })
+
+    // This only store atmost 100 video in History
+    user.watchHistory = user.watchHistory.slice(0, 100);
+    await user.save({validateBeforeSave: false});
 
     // const redisKey = userId
     //     ? `view:user:${userId}:video:${videoId}`
@@ -427,7 +395,24 @@ const getVideoById = asyncHandler(async (req, res) => {
     //     await redis.set(redisKey, "viewed", "EX", VIWE_TTL_MINUTES * 60)
     // }
 
-    return res.status(200).json(new ApiResponse(200, video.docs, "Current Video fetched successfully"))  
+    return res.status(200).json(new ApiResponse(200, videoDetail.docs[0], "Current Video fetched successfully"))  
+})
+
+
+const updateWatchProgress = asyncHandler(async (req, res) => {
+    const {videoId, progress} = req.body;
+
+    await User.updateOne(
+        {_id: req.user?._id, "$watchHistory.video": videoId},
+        {
+            $set: {
+                "$watchHistory.progress": progress,
+                "$watchHistory.watchedAt": new Date()
+            }
+        }
+    )
+
+    res.status(200).json(new ApiResponse(200, null, "Progress updated"));
 })
 
 
@@ -449,7 +434,7 @@ const updateVideo = asyncHandler(async (req, res) => {
     if (req.user._id.toString() !== video.owner.toString()) {
         throw new ApiError(403, "You are not authorized to update this video");
     }
-    // console.log("Received file:", req.file);
+
 
     const thumbnailToDelete = video.thumbnail.public_id;
 
@@ -461,7 +446,7 @@ const updateVideo = asyncHandler(async (req, res) => {
     
     // Upload new thumbnail image to Cloudinary
     const thumbnailUpload = await uploadOnCloudinary(thumbnailLocalPath);
-    // console.log("Cloudinary upload result:", thumbnailUpload);
+
         
     if (!thumbnailUpload?.url){
         throw new ApiError(500, "Error in uploading the thumbnail file");
@@ -606,7 +591,8 @@ export {
     getVideoById,
     updateVideo,
     deleteVideo,
-    togglePublishStatus
+    togglePublishStatus,
+    getSignUrl
 }
 
 // This output of "req.file"

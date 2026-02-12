@@ -39,17 +39,17 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
     if (isLiked) {
        await isLiked.deleteOne();
 
-       const likeCount = await Like.countDocuments({video: videoId});
+    //    const likeCount = await Like.countDocuments({video: videoId});
 
-       return res.status(200).json(new ApiResponse(200, {liked: false, likeCount}, "Video disliked successfully"))
+       return res.status(200).json(new ApiResponse(200, {liked: false}, "Video disliked successfully"))
     }
 
     await Like.create({ video: videoId, likedBy: userId });
 
-    const likeCount = await Like.countDocuments({video: videoId});
+    // const likeCount = await Like.countDocuments({video: videoId});
 
     return res.status(201)
-    .json(new ApiResponse(200, {liked: true, likeCount}, "Video liked successfully"))
+    .json(new ApiResponse(200, {liked: true}, "Video liked successfully"))
     
 })
 
@@ -122,7 +122,7 @@ const toggleTweetLike = asyncHandler(async (req, res) => {
 const getLikedVideos = asyncHandler(async (req, res) => {
     //TODO: get all liked videos
 
-    const {limit = 10, page = 1, query = "", sortBy = '{"createdAt": -1}', sortType = "newest"} = req.query;
+    const {limit = 10, page = 1, query = "", sortType = "newest"} = req.query;
 
     const userId = req.user?._id
 
@@ -130,18 +130,12 @@ const getLikedVideos = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid User ID")
     }
     
-    let parsedSortBy;
-    try {
-        parsedSortBy = typeof sortBy === "string" ? JSON.parse(sortBy) : sortBy;
-    } catch {
-        parsedSortBy = { createdAt: -1 };
-    }
     
-    const liked = await Like.aggregate([
+    const likedVideos = await Like.aggregate([
         {
             $match: {
                 likedBy: new mongoose.Types.ObjectId(userId),
-                // video: {$ne: null}
+                video: { $ne: null }
             }
         },
         {
@@ -153,83 +147,60 @@ const getLikedVideos = asyncHandler(async (req, res) => {
             }
         },
         {
-            $addFields: {
-                video: { $first: "$video" }
-            }
+            $unwind: "$video"
         },
         {
             $lookup: {
                 from: "users",
                 localField: "video.owner",
                 foreignField: "_id",
-                as: "video.owner",
+                as: "channel",
             }
         },
         {
-            $addFields: {
-                "video.owner": { $first: "$video.owner"}
-            }
-        },
-        {
-            $lookup: {
-                from: "users",
-                localField: "likedBy",
-                foreignField: "_id",
-                as: "likedBy",
-            }
-        },
-        {
-            $addFields: {
-                likedBy: { $first: "$likedBy" },
-                // likeCount: { $size: "likeCount" }
-            }
+            $unwind: "$channel"
         },
         {
             $lookup: {
                 from: "likes",
-                localField: "_id",
+                localField: "video._id",
                 foreignField: "video",
-                as: "videoLikes"
+                as: "videoLikes",
             }
         },
         {
             $addFields: {
-                likeCount: { $size: "$videoLikes" }
+                likeCount: {$size: "$videoLikes"}
             }
         },
         {
+            $sort: { createdAt: -1 }
+        },
+        { $skip: (page - 1) * limit },
+        { $limit: Number(limit) },
+        {
             $project: {
-                _id: 1,
+                _id: "$video._id",
+                title: "$video.title",
+                description: "$video.description",
+                thumbnail: "$video.thumbnail.url",
+                views: "$video.views",
                 likeCount: 1,
-                likedBy: {
-                    _id: 1,
-                    username: 1
-                },
-                video: {
-                    _id: 1,
-                    title: 1,
-                    description: 1,
-                    thumbnail: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    owner: {
-                        _id: 1,
-                        username: 1,
-                        avatar: 1
-                    }
+                likedAt: "$createdAt",
+                channel: {
+                    _id: "$channel._id",
+                    avatar: "$channel.avatar",
+                    username: "$channel.username"
                 }
             }
         },
-        { $sort: parsedSortBy },
-        { $skip: (parseInt(page) - 1) * parseInt(limit)},
-        { $limit: parseInt(limit)}
     ])
 
     const totalVideoLiked = await Like.countDocuments({likedBy: new mongoose.Types.ObjectId(userId)})
 
     return res.status(200)
     .json(new ApiResponse(200, {
-        videos: liked,
+        videos: likedVideos,
         total: totalVideoLiked,
         page: parseInt(page),
         limit: parseInt(limit)

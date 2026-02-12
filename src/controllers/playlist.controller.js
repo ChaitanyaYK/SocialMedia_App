@@ -18,7 +18,7 @@ const createPlaylist = asyncHandler(async (req, res) => {
     const userId = req.user?._id;
 
     if (!userId || !isValidObjectId(userId)) {
-        throw new ApiError(400, "Invalid video Id");
+        throw new ApiError(400, "Invalid user Id");
     }
 
     if (!name) {
@@ -31,12 +31,12 @@ const createPlaylist = asyncHandler(async (req, res) => {
         owner: userId,
     })
 
-    const createdPlaylist = await Playlist.findById(playlist._id).select(
-        "video"
-    )
+    // const createdPlaylist = await Playlist.findById(playlist._id).select(
+    //     "video"
+    // )
 
     return res.status(200)
-    .json(new ApiResponse(200, createdPlaylist, "Playlist Created successfully"))
+    .json(new ApiResponse(200, playlist, "Playlist Created successfully"))
 })
 
 
@@ -184,26 +184,26 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid video Id");
     }
     
-    const [playlist, videos] = await Promise.all([
-        Playlist.findById(playlistId),
-        Video.findById(videoId)
-    ])
-    
+    const playlist = await Playlist.findById(playlistId);
     if (!playlist) throw new ApiError(404, "playlist not found");
-    if (!videos) throw new ApiError(404, "Video not found");
+    
+    const video = await Video.findById(videoId);
+    if (!video) throw new ApiError(404, "Video not found");
 
     if (!playlist.owner.equals(req.user._id)) {
         throw new ApiError(403, "You are not authorized to modify this playlist");
     }
 
-    playlist.videos = playlist.videos || []; 
+    const videoExist = playlist.videos.some(
+        vId => vId.toString() === videoId
+    )
     
-    if (playlist.videos.includes(videoId)) {
+    if (videoExist) {
         throw new ApiError(400, "Video already exist in Playlist");
     }  
     
     playlist.videos.push(videoId);
-    await playlist.save({validatateBeforeSave: true});
+    await playlist.save({validateBeforeSave: true});
 
     return res.status(200)
     .json(new ApiResponse(200, playlist, "Video added to playlist successfully"));
@@ -232,8 +232,12 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
         throw new ApiError(403, "You are not authorized to modify this playlist");
     }
 
+    const videoExist = playlist.videos.some(
+        vId => vId.toString() === videoId
+    )
+
     //  Check if video exists in playlist
-    if (!playlist.videos.includes(videoId)) {
+    if (!videoExist) {
         throw new ApiError(400, "Video does not exist in playlist");
     }
 
@@ -242,7 +246,6 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
         (id) => id.toString() !== videoId
     );
 
-    await Playlist.videos.findByIdAndDelete(videoId)
     await playlist.save({validatateBeforeSave: false})
 
     return res.status(200)
@@ -272,7 +275,7 @@ const deletePlaylist = asyncHandler(async (req, res) => {
     await playlist.deleteOne();
 
     return res.status(200)
-    .json(new ApiResponse(200, {}, "playlist deleted successfully"))
+    .json(new ApiResponse(200, { playlistId }, "playlist deleted successfully"))
 })
 
 

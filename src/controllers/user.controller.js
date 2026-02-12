@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { User } from "../models/user.model.js"
-import { deleteOnCloudinary, uploadOnCloudinary } from "../utils/cloudinary.js";
+import { deleteOnCloudinary, thumbnailUploaded, uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
 // import { Subscription } from "../models/subscription.model.js";
@@ -42,9 +42,6 @@ const registerUser = asyncHandler( async (req, res) => {
     // return response
 
     const {fullName, email, username, password} = req.body;
-    // console.log("email: ", email);
-
-    // console.log(req.body);
     
     // Here we check that fileds are empty then show Error
     if (
@@ -63,8 +60,6 @@ const registerUser = asyncHandler( async (req, res) => {
         throw new ApiError(409, "User with email or username already exists")
     }
 
-    // console.log(req.files);
-    
 
     // like "express" give 'req.body' access same "multer" give 'req.files' 
     // Here we get path of file store by multer in local storage 
@@ -231,8 +226,8 @@ const refreshAccessToken = asyncHandler( async (req, res) => {
         }
 
         // Optional: log comparison
-        console.log("Incoming:", incomingRefreshToken);
-        console.log("Stored:", user.refreshToken);
+        // console.log("Incoming:", incomingRefreshToken);
+        // console.log("Stored:", user.refreshToken);
     
         // Here we generate Access And RefreshTokens
         const {accessToken, newRefreshToken} = generateAccessAndRefreshTokens(user._id)
@@ -406,6 +401,8 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
         throw new ApiError(400, "username is missing")
     }
 
+    const userId = req.user?._id || null;
+
     // here we write Aggregate Pipeline which user to get join "Subscription" Model with "User" Model here wee write pipelines in objects
     // in 1st pipeline we match username then next pipeline match _id filed with channel field if same then store result in subscribers
     // In 4th pipeline we add new filed in user model by "$addFields " & pass feild_name: value  In 5th pipeline $project Feild is used to present specific feilds only
@@ -428,7 +425,28 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
                 from: "subscriptions",
                 localField: "_id",
                 foreignField: "subscriber",
-                as: "subscribedTo"
+                as: "subscribedTo",
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "channel",
+                            foreignField: "_id",
+                            as: "channel",
+                        }
+                    },
+                    { $unwind: "$channel" },
+                    {
+                        $project: {
+                            _id: 0,
+                            "channel._id": 1,
+                            "channel.avatar": 1,
+                            "channel.coverImage": 1,
+                            "channel.username": 1,
+                            "channel.fullName": 1,
+                        }
+                    }
+                ]
             }
         },
         {
@@ -441,7 +459,10 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
                 },
                 isSubscribed: {
                     $cond: {
-                        if: {$in: [req.user?._id, "$subscribers.subscriber"]},  // here $in is used to check condition that req.user is present in subscribers field find the subscriber
+                        if: { $and: [
+                             {$ne: [userId, null]},
+                             {$in: [userId, "$subscribers.subscriber"]} 
+                            ]},  // here $in is used to check condition that req.user is present in subscribers field find the subscriber
                         then: true,
                         else: false
                     }
@@ -459,13 +480,12 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
                 isSubscribed: 1,
                 avatar: 1,
                 coverImage: 1,
-                subscribedTo: 1,
+                subscribedTo: "$subscribedTo.channel",
                 subscribers: 1
             }
         }
     ])
 
-    // console.log(channel);
 
     if (!channel?.length) {
         throw new ApiError(404, "channel does not exists")
@@ -479,7 +499,11 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
 
 
 const getWatchHistory = asyncHandler( async (req, res) => {
-    const user = await User.aggregate([
+    const page = Number(req.query.page) || 1;
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    const history = await User.aggregate([
         {
             $match:{
                 _id: new mongoose.Types.ObjectId(req.user?._id)
@@ -492,65 +516,65 @@ const getWatchHistory = asyncHandler( async (req, res) => {
             // $lookup used to get data form another model or join another model to our model so we can get data
             $lookup: {
                 from: "videos",  // this field take collection or model_name as value which we want to join
-                localField: "watchHistory",  // This take localfield name which _id is match with foreignfield _id
+                localField: "watchHistory.video",  // This take localfield name which _id is match with foreignfield _id
                 foreignField: "_id",        
-                as: "watchHistory",     // This take filed name of our model in which another model data is to be store or we want to get
-                
-                pipeline: [  // This is used to add pipeline in existing pipeline or we can say sub-pipeline
-                    {
-                        $lookup: {
-                            from: "users",
-                            localField: "owner",
-                            foreignField: "_id",
-                            as: "owner",
-                            pipeline: [
-                                {
-                                    $project: {
-                                        username: 1,
-                                        fullName: 1,
-                                        email: 1,
-                                        avatar: 1
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    {
-                        // $addField is used to add new feild in existing model 
-                        $addFields: {
-                            owner: {
-                                $first: "$owner"  // by $first we can pass object so at frontend developer can extract data simple as owner.field_name
-                            }
-                        }
-                    }
-                ]
+                as: "video",     // This take filed name of our model in which another model data is to be store or we want to get
             }
         },
-        // {
-        //     $addFields: {
-        //         video: { $first: "$video" },
-        //         watchedAt: "$watchHistory.watchedAt",
-        //     },
-        // },
-        // {
-        //     $project: {
-        //         _id: 0,
-        //         video: 1,
-        //         watchedAt: 1,
-        //     },
-        // },
-        // { $sort: { watchedAt: -1 } }, // newest first
+        {
+            $unwind: "$video"
+        },
+        {
+            $lookup: {
+                from: "users",
+                localField: "video.owner",
+                foreignField: "_id",
+                as: "channel"
+            }
+        },
+        {
+            $unwind: "$channel"
+        },
+        {
+            $sort: {"watchHistory.watchedAt": -1}
+        },
+        {
+            $limit: limit
+        },
+        {
+            $skip: skip
+        },
+        {
+            $project: {
+                _id: "$video._id",
+                title: "$video.title",
+                description: "$video.description",
+                thumbnail: "$video.thumbnail.url",
+                views: "$video.views",
+                duration: "$video.duration",
+
+                channelId: "$channel._id",
+                channelName: "$channel.fullName",
+                channelAvatar: "$channel.avatar",
+                
+                watchedAt: "$watchHistory.watchedAt",
+                progress: "$watchHistory.progress",
+            }
+        }
     ])
 
-    if (!user || user.length === 0) {
-        throw new ApiError(404, "User not found or has no watch history");
+    if (!history.length) {
+        throw new ApiError(404, "history not found");
+        // return res.status(200).json(
+        //     new ApiResponse(200, [], "No watch history found")
+        // )
     }
 
     return res.status(200)
     .json(
         new ApiResponse(
             200,
-            user,
+            history,
             "Watch history fetched successfully"
         )
     )

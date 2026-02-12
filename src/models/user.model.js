@@ -39,7 +39,6 @@ const userSchema = new Schema({
     },
     watchHistory: [
         {
-
             video: {
                 type: Schema.Types.ObjectId,
                 ref: "Video"
@@ -47,6 +46,10 @@ const userSchema = new Schema({
             watchedAt: {
                 type: Date,
                 default: Date.now
+            },
+            progress: {
+                type: Number,
+                default: 0,
             }
         }
     ],
