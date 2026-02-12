@@ -6,7 +6,7 @@ import { DATA_LIMIT } from "./constants.js";
 const app = express()
 
 app.use(cors({
-    origin: ["http://localhost:8000", "http://localhost:5173"],
+    origin: ["http://localhost:8000", "http://localhost:5173", process.env.CORS_ORIGIN],
     // origin: process.env.CORS_ORIGIN,
     credentials: true,
     optionsSuccessStatus: 200
