@@ -5,9 +5,16 @@ import { DATA_LIMIT } from "./constants.js";
 
 const app = express()
 
+const allowedOrigin = process.env.CORS_ORIGIN;
 app.use(cors({
-    origin: [process.env.CORS_ORIGIN, "http://localhost:8000", "http://localhost:5173"],
-    // origin: process.env.CORS_ORIGIN,
+    // origin: [process.env.CORS_ORIGIN, "http://localhost:8000", "http://localhost:5173", "https://vedioverse.vercel.app"],
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigin.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS"));
+        }
+    },
     credentials: true,
     optionsSuccessStatus: 200
 }))
@@ -30,6 +37,7 @@ import commentRouter from "./routes/comment.routes.js"
 import likeRouter from "./routes/like.routes.js"
 import playlistRouter from "./routes/playlist.routes.js"
 import dashboardRouter from "./routes/dashboard.routes.js"
+import { ApiError } from "./utils/ApiError.js";
 
 //routes declaration
 // app.use("/api/v1/healthcheck", healthcheckRouter)
