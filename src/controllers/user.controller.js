@@ -157,7 +157,8 @@ const loginUser = asyncHandler( async (req, res) => {
     // we write options in object & by this we can't edit cookie data we can only edit from server
     const options = {
         httpOnly: true,
-        secure: true
+        secure: true,
+        sameSite: "none"
     }
 
     return res.status(200)
@@ -192,7 +193,8 @@ const logoutUser = asyncHandler( async (req, res) => {
 
     const options = {
         httpOnly: true,
-        secure: true
+        secure: true,
+        sameSite: "none"
     }
 
     return res.status(200)
@@ -239,7 +241,8 @@ const refreshAccessToken = asyncHandler( async (req, res) => {
 
         const options = {
             httpOnly: true,
-            secure: true
+            secure: true,
+            sameSite: "none"
         }
     
         // Here we store Token in cookies
