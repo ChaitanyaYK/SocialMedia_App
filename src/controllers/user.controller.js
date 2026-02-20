@@ -8,6 +8,7 @@ import jwt from "jsonwebtoken";
 import { getPublicIdFromUrl } from "../utils/deleteCloudinaryFile.js";
 import { cloudinary } from "../utils/cloudinary.js";
 import mongoose from "mongoose";
+// import redisClient from "../config/redis.js";
 
 
 
@@ -285,8 +286,17 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     if (!req.user) {
         throw new ApiError(200, "User not Found")
     }
+
+    const currUser = req.user;
+
+    // const user = redisClient.get("user");
+
+    // if (!user) {
+    //     await redisClient.set("user", JSON.stringify(currUser));
+    // }
+
     return res.status(200)
-    .json(new ApiResponse(200, req.user, "Current user fetchedd successfully"))
+    .json(new ApiResponse(200, currUser, "Current user fetchedd successfully"))
 })
 
 
@@ -296,6 +306,15 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     if (!fullName || !email) {
         throw new ApiError(400, "All fields are required")
     }
+
+    const userId = req.user?._id;
+
+    // const storeUser = await redisClient.get(`user:${userId}`);
+
+    // if (storeUser) {
+    //     return res.status(200)
+    //     .json(new ApiResponse(200, storeUser, "Account details updated successfully"))
+    // }
     
     const user = await User.findByIdAndUpdate(
         req.user?._id,
@@ -308,6 +327,8 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
         },
         { new: true }
     ).select("-password")
+
+    // await redisClient.set(`user:${user._id}`, JSON.stringify(user));
     
     return res.status(200)
     .json(new ApiResponse(200, user, "Account details updated successfully"))
@@ -406,6 +427,16 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
 
     const userId = req.user?._id || null;
 
+    // const storeChannel = await redisClient.get(`user:${userId}`);
+    // console.log("storeChannel type:", typeof storeChannel, storeChannel);
+
+    // if (storeChannel) {
+    //     const parse = JSON.parse(storeChannel);
+    //     console.log("storeChannel:", parse);
+    //      return res.status(200)
+    //     .json(new ApiResponse(200, parse, "User channel fetched successfully"));
+    // }
+
     // here we write Aggregate Pipeline which user to get join "Subscription" Model with "User" Model here wee write pipelines in objects
     // in 1st pipeline we match username then next pipeline match _id filed with channel field if same then store result in subscribers
     // In 4th pipeline we add new filed in user model by "$addFields " & pass feild_name: value  In 5th pipeline $project Feild is used to present specific feilds only
@@ -489,10 +520,12 @@ const getUserChannelProfile = asyncHandler( async (req, res) => {
         }
     ])
 
-
+    
+    
     if (!channel?.length) {
         throw new ApiError(404, "channel does not exists")
     }
+    // await redisClient.set(`channel:${channel._id}`, JSON.stringify(channel[0]));
     
     return res.status(200)
     .json(

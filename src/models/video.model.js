@@ -50,7 +50,11 @@ const videoSchema = new Schema(
             type: Schema.Types.ObjectId,
             ref: "User"
         },
-        
+        visibility: {
+            type: String,
+            enum: ["public", "subscriber", "private"],
+            default: "public",
+        }
     },
     {
         timestamps: true

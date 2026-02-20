@@ -8,6 +8,7 @@ import { cloudinary, uploadOnCloudinary, deleteOnCloudinary, thumbnailUploaded }
 import { User } from "../models/user.model.js";
 import { Like } from "../models/like.model.js";
 import { Comment } from "../models/comment.model.js";
+import { Subscription } from "../models/subscription.model.js";
 
 // import { redis } from "../utils/redis.js";
 // import { VIWE_TTL_MINUTES } from "../constants.js";
@@ -19,30 +20,6 @@ function formatDuration(seconds) {
     return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
-const getSignUrl = asyncHandler(async (req, res) => {
-    const {videoId} = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(videoId)) {
-        throw new ApiError(400, "Invaild videoId");
-    }
-
-    const video = await Video.findById(videoId);
-
-    if (!video) {
-        throw new ApiError(404, "Video not found");
-    }
-
-    // const signedUrl = cloudinary.utils.sign_request(
-    //     {url: video.videoFile.hls_url},
-    //     process.env.CLOUDINARY_API_SECRET
-    // )
-
-    // if (!signedUrl) {
-    //     throw new ApiError(500, "Error occured in creating signed url")
-    // }
-
-    res.status(200).json(new ApiResponse(200, { url: video.videoFile.hls_url }, "Video url fetch successfully"))
-})
 
 const getAllVideos = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, query = "", sortBy = "newest", userId = ""} = req.query;
@@ -139,8 +116,10 @@ const getAllVideos = asyncHandler(async (req, res) => {
 
 
 const publishAVideo = asyncHandler(async (req, res) => {
-    const { title, description, isPublished = false} = req.body;
+    const { title, description} = req.body;
     // TODO: get video, upload to cloudinary, create video
+
+    const isPublished = req.body.isPublished === "true";
 
     if (!title || title.trim() === "") {
         throw new ApiError(400, "Title is required");
@@ -323,13 +302,11 @@ const getVideoById = asyncHandler(async (req, res) => {
                 ]
             }
         },
+        { $unwind: "$owner"},
         {
             $addFields: {
                 likesCount: {
                     $size: "$likes"
-                },
-                owner: {
-                    $first: "$owner"
                 },
                 isLiked: {
                     $cond: {
@@ -402,17 +379,17 @@ const getVideoById = asyncHandler(async (req, res) => {
 const updateWatchProgress = asyncHandler(async (req, res) => {
     const {videoId, progress} = req.body;
 
-    await User.updateOne(
+    const watchProgress = await User.updateOne(
         {_id: req.user?._id, "$watchHistory.video": videoId},
         {
             $set: {
-                "$watchHistory.progress": progress,
-                "$watchHistory.watchedAt": new Date()
+                "watchHistory.$progress": progress,
+                "watchHistory.$watchedAt": new Date()
             }
         }
     )
 
-    res.status(200).json(new ApiResponse(200, null, "Progress updated"));
+    res.status(200).json(new ApiResponse(200, watchProgress, "Progress updated"));
 })
 
 
@@ -438,7 +415,7 @@ const updateVideo = asyncHandler(async (req, res) => {
 
     const thumbnailToDelete = video.thumbnail.public_id;
 
-    const thumbnailLocalPath = req.file?.path;
+    const thumbnailLocalPath = req.files?.thumbnail?.[0]?.path;
 
     if (!thumbnailLocalPath) {
         throw new ApiError(400, "Thumbnail file not found");
@@ -512,7 +489,7 @@ const deleteVideo = asyncHandler(async (req, res) => {
     // Delete from MongoDB
     const deletedVideo  = await Video.findByIdAndDelete(video._id)
 
-    if (!deleteVideo) {
+    if (!deletedVideo) {
         throw new ApiError(400, "Failed to delete video please try again");
     }
 
@@ -557,33 +534,40 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, video, `Video ${video.isPublished ? "published" : "unpublished"} successfully`))
 })
 
-// const addWatchHistory = asyncHandler(async(req, res) => {
-//     const { videoId } = req.params;
 
-//     const user = await User.findById(req.user._id);
+const getUserVideos = asyncHandler(async(req, res) => {
+    const ownerId = req.params.userId;
+    const viewer = req.user;
 
-//     if(!user) {
-//         throw new ApiError(404, "User not Found");
-//     }
+    let filter = { owner: ownerId };
 
-//     // Prevent duplicate entries (optional)
-//     const videoPresent = user.watchHistory.find((entry) => {
-//         entry.video.toString() === videoId
-//     });
+    if (!viewer) {
+        filter.isPublished = true;
+        filter.visibility = "public";
+    } else if(viewer._id.equals(new mongoose.Types.ObjectId(ownerId))) {
+        const videos = await Video.find(filter).sort({createdAt: -1});
 
-//     if (videoPresent) {
-//         // Update timestamp instead of pushing duplicate
-//         videoPresent.watchedAt = new Date();
-//     } else {
-//         user.watchHistory.push({ video: videoId, watchedAt: new Date() });
-//     }
+        res.status(200).json(new ApiResponse(200, videos, "Channel Video fetch successfully"));
+        return;
+    } else {
+        const isSubscriber = await Subscription.exists({
+            channel: ownerId,
+            subscriber: viewer._id
+        });
 
-//     await user.save();
+        filter.isPublished = true;
 
-//     return res.status(200).json(
-//         new ApiResponse(200, user.watchHistory, "Watch history updated successfully")
-//     );
-// });
+        if (isSubscriber) {
+            filter.visibility = { $in: ["public", "subscriber"] };
+        } else {
+            filter.visibility = "public";
+        }
+    }
+
+    const videos = (await Video.find(filter)).sort({createdAt: -1});
+
+    res.status(200).json(new ApiResponse(200, videos, "Channel Video fetch successfully"));
+})
 
 export {
     getAllVideos,
@@ -592,7 +576,7 @@ export {
     updateVideo,
     deleteVideo,
     togglePublishStatus,
-    getSignUrl
+    getUserVideos
 }
 
 // This output of "req.file"
