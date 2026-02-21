@@ -40,7 +40,7 @@ import dashboardRouter from "./routes/dashboard.routes.js"
 
 
 //routes declaration
-app.use("/api/v1/health", healthRouter)
+app.use("/api/v1/healthcheck", healthRouter)
 app.use("/api/v1/user", userRouter)
 app.use("/api/v1/tweets", tweetRouter)
 app.use("/api/v1/subscriptions", subscriptionRouter)
